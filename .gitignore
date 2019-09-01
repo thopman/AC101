@@ -30,3 +30,6 @@
 *.exe
 *.out
 *.app
+
+#ignore build folder
+/examples/hello_world_faust/build/
