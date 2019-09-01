@@ -1,7 +1,7 @@
 /*
 	AC101 - a AC101 Codec driver library for ESP-IDF
-	Adapted by Thomas Hopman from the Arduino driver made by Ivo Pullens
-
+	ported to esp-idf by Thomas Hopman from the Arduino driver made by Ivo Pullens
+	
 	AC101 - An AC101 Codec driver library for Arduino
 	Copyright (C) 2019, Ivo Pullens, Emmission
 
@@ -26,19 +26,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_system.h"
+#include "AC101.h"
 #include "driver/i2c.h"
 #include "driver/gpio.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "esp_system.h"
-#include "sdkconfig.h"
-#include "AC101.h"
 
+// Constructor.
+AC101::AC101()
+{
+}
 
-// Initialize i2c for the ESP32
+// Initialize the I2C interface
 esp_err_t AC101::InitI2C(void)
 {
     i2c_port_t i2c_master_port = (i2c_port_t) I2C_MASTER_NUM;
@@ -55,79 +54,18 @@ esp_err_t AC101::InitI2C(void)
                        I2C_MASTER_TX_BUF_DISABLE, 0);
 }
 
-// Write to a register of the AC101
-// reg: Register Address
-// val: Value to be written
-// Returns a esp_err_t Value
-esp_err_t AC101::WriteReg(uint8_t reg, uint16_t val)
-{
-    esp_err_t ret = ESP_OK;
-    uint8_t buf[2];
-    buf[0] = uint8_t((val >> 8) & 0xff);
-    buf[1] = uint8_t(val & 0xff);
-    
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    ret |= i2c_master_start(cmd);
-    ret |= i2c_master_write_byte(cmd, (AC101_ADDR << 1) | WRITE_BIT, ACK_CHECK_EN);
-    ret |= i2c_master_write_byte(cmd, reg, ACK_CHECK_EN);
-    ret |= i2c_master_write(cmd, buf, 2, ACK_CHECK_EN);
-    ret |= i2c_master_stop(cmd);
-    ret |= i2c_master_cmd_begin((i2c_port_t) I2C_MASTER_NUM, cmd, 1000 / portTICK_RATE_MS);
-    i2c_cmd_link_delete(cmd);
-    return ret;
-}
-
-// Read a register of the AC101
-// reg: Register Address to be read
-// Returns the register value
-uint16_t AC101::ReadReg(uint8_t reg)
-{
-	uint16_t val = 0;
-	uint8_t data_rd[2];
-	ReadReg_Full(reg, data_rd, 2);
-	val=(data_rd[0]<<8)+data_rd[1];
-	return val;
-}
-
-// AC101 read register
-// Reads the value of the AC101 register Address
-// reg: Register Address
-// data_rd: Pointer to return value
-// size: size of data to be read
-esp_err_t AC101::ReadReg_Full(uint8_t reg, uint8_t* data_rd, size_t size)
-{
-    esp_err_t ret = ESP_OK;
-    if (size == 0) {
-    	return ESP_OK;
-    	}
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    ret |= i2c_master_start(cmd);
-    ret |= i2c_master_write_byte(cmd, (AC101_ADDR << 1), ACK_CHECK_EN);
-    ret |= i2c_master_write_byte(cmd, reg, ACK_CHECK_EN);
-    ret |= i2c_master_start(cmd);
-    ret |= i2c_master_write_byte(cmd, (AC101_ADDR << 1) | READ_BIT, ACK_CHECK_EN);
-    if (size > 1) {
-        ret |= i2c_master_read(cmd, data_rd, size - 1, ACK_VAL);
-    }
-    ret |= i2c_master_read_byte(cmd, data_rd + size - 1, NACK_VAL);
-    ret |= i2c_master_stop(cmd);
-    ret |= i2c_master_cmd_begin((i2c_port_t) I2C_MASTER_NUM, cmd, 1000 / portTICK_RATE_MS);
-    i2c_cmd_link_delete(cmd);
-    return ret;
-}
-
-AC101::AC101()
-{
-}
-
+// AC101 begin
+// Initialize codec, using provided I2C pins and bus frequency.
+// sets up 24 bit 48Khz sample-rate
+// enables line input, line (headphone) output and turns on the speaker outputs
+// @return false on success, true on failure.
 esp_err_t AC101::begin()
 {
 	if(InitI2C()) return -1;
 	esp_err_t res;
 	res = WriteReg(CHIP_AUDIO_RS, 0x123);
 	WriteReg(CHIP_AUDIO_RS, 0x123);
-	//printf("\nprint res after reset = %d", res);
-	//printf("\n");
+	
 	vTaskDelay(1000 / portTICK_PERIOD_MS);
 	if (ESP_OK != res) {
 		ESP_LOGE(AC101_TAG, "reset failed!");
@@ -135,13 +73,12 @@ esp_err_t AC101::begin()
 	} else {
 		ESP_LOGI(AC101_TAG, "reset succeed");
 	}
-	//printf("\ndump registers after reset =\n");
-	//DumpRegisters();
+
 	res |= WriteReg(SPKOUT_CTRL, 0xe880);
 
-	// Enable the PLL from 256*44.1KHz MCLK source
+	// Enable the PLL from 512*48KHz MCLK source 24.576Mhz
 	res |= WriteReg(PLL_CTRL1, 0x014f);
-	res |= WriteReg(PLL_CTRL2, 0x8030);				// N = 96 @ 0x8600 mclk 12.288Mhz // N = 3 @ 0x8030 mclk 24576000
+	res |= WriteReg(PLL_CTRL2, 0x8030);				// N = 96 @ 0x8600 mclk 12.288Mhz // N = 3 @ 0x8030 mclk 24.576Mhz
 
 	// Clocking system
 	res |= WriteReg(SYSCLK_CTRL, 0x8b08);
@@ -150,7 +87,7 @@ esp_err_t AC101::begin()
 
 	// Set default at I2S, 48KHz, 24bit
 	res |= SetI2sSampleRate(SAMPLE_RATE_48000);
-	res |= SetI2sClock(BCLK_DIV_8, false, LRCK_DIV_64, false); // res |= SetI2sClock(BCLK_DIV_8, false, LRCK_DIV_64, false);
+	res |= SetI2sClock(BCLK_DIV_8, false, LRCK_DIV_64, false); 
 	res |= SetI2sMode(MODE_SLAVE);
 	res |= SetI2sWordSize(WORD_SIZE_24_BITS);
 	res |= SetI2sFormat(DATA_FORMAT_I2S);
@@ -179,23 +116,17 @@ esp_err_t AC101::begin()
 	return res;
 }
 
-void AC101::DumpRegisters()
-{
-	for (size_t i = 0; i < ARRAY_SIZE(regs); ++i)
-	{
-		printf("%02x", regs[i]);
-		printf(" = ");
-		printf("%04x", ReadReg(regs[i]));
-		printf("\n");
-	}
-}
-
+// Get speaker volume.
+// @return Speaker volume, [63..0] for [0..-43.5] [dB], in increments of 2.
 uint8_t AC101::GetVolumeSpeaker()
 {
 	// Times 2, to scale to same range as headphone volume
 	return (ReadReg(SPKOUT_CTRL) & 31) * 2;
 }
 
+// Set speaker volume.
+// @param volume   Target volume, [63..0] for [0..-43.5] [dB], in increments of 2.
+// @return false on success, true on failure.
 esp_err_t AC101::SetVolumeSpeaker(uint8_t volume)
 {
 	// Divide by 2, as it is scaled to same range as headphone volume
@@ -208,34 +139,40 @@ esp_err_t AC101::SetVolumeSpeaker(uint8_t volume)
 	return WriteReg(SPKOUT_CTRL, val);
 }
 
+// Get headphone volume.
+// @return Headphone volume, [63..0] for [0..-62] [dB]
 uint8_t AC101::GetVolumeHeadphone()
 {
 	return (ReadReg(HPOUT_CTRL) >> 4) & 63;
 }
 
+// Set headphone volume
+// @param volume   Target volume, [63..0] for [0..-62] [dB]
+// @return false on success, true on failure.
 esp_err_t AC101::SetVolumeHeadphone(uint8_t volume)
 {
 	if (volume > 63) volume = 63;
 
 	uint16_t val = ReadReg(HPOUT_CTRL);
-	//printf("\n");
-	//printf("\nsetvolumeheadphone debug stuff = ");
-	//printf("\n %x", val);
+
 	val &= ~63 << 4;
-	//printf("\n %x", val);
+
 	val |= volume << 4;
-	//printf("\n %x", val);
-	//printf("\n");
-	//printf("\n");
 
 	return WriteReg(HPOUT_CTRL, val);
 }
 
+// Configure I2S samplerate.
+// @param rate   Samplerate.
+// @return false on success, true on failure.
 esp_err_t AC101::SetI2sSampleRate(I2sSampleRate_t rate)
 {
 	return WriteReg(I2S_SR_CTRL, rate);
 }
 
+// Configure I2S mode (master/slave).
+// @param mode   Mode.
+// @return false on success, true on failure.
 esp_err_t AC101::SetI2sMode(I2sMode_t mode)
 {
 	uint16_t val = ReadReg(I2S1LCK_CTRL);
@@ -244,6 +181,9 @@ esp_err_t AC101::SetI2sMode(I2sMode_t mode)
 	return WriteReg(I2S1LCK_CTRL, val);
 }
 
+// Configure I2S word size (8/16/20/24 bits).
+// @param size   Word size.
+// @return false on success, true on failure.
 esp_err_t AC101::SetI2sWordSize(I2sWordSize_t size)
 {
 	uint16_t val = ReadReg(I2S1LCK_CTRL);
@@ -252,6 +192,9 @@ esp_err_t AC101::SetI2sWordSize(I2sWordSize_t size)
 	return WriteReg(I2S1LCK_CTRL, val);
 }
 
+// Configure I2S format (I2S/Left/Right/Dsp).
+// @param format   I2S format.
+// @return false on success, true on failure.
 esp_err_t AC101::SetI2sFormat(I2sFormat_t format)
 {
 	uint16_t val = ReadReg(I2S1LCK_CTRL);
@@ -260,6 +203,12 @@ esp_err_t AC101::SetI2sFormat(I2sFormat_t format)
 	return WriteReg(I2S1LCK_CTRL, val);
 }
 
+// Configure I2S clock.
+// @param bitClockDiv   I2S1CLK/BCLK1 ratio.
+// @param bitClockInv   I2S1 BCLK Polarity.
+// @param lrClockDiv    BCLK1/LRCK ratio.
+// @param lrClockInv    I2S1 LRCK Polarity.
+// @return false on success, true on failure.
 esp_err_t AC101::SetI2sClock(I2sBitClockDiv_t bitClockDiv, bool bitClockInv, I2sLrClockDiv_t lrClockDiv, bool lrClockInv)
 {
 	uint16_t val = ReadReg(I2S1LCK_CTRL);
@@ -271,6 +220,9 @@ esp_err_t AC101::SetI2sClock(I2sBitClockDiv_t bitClockDiv, bool bitClockInv, I2s
 	return WriteReg(I2S1LCK_CTRL, val);
 }
 
+// Configure the mode (Adc/Dac/Adc+Dac/Line)
+// @param mode    Operating mode.
+// @return false on success, true on failure.
 esp_err_t AC101::SetMode(Mode_t mode)
 {
 	esp_err_t ret = ESP_OK;
@@ -305,7 +257,21 @@ esp_err_t AC101::SetMode(Mode_t mode)
 	return ret;
 }
 
+// AC101 DumpRegister
+// prints out contents of the AC101 registers in hex
+void AC101::DumpRegisters()
+{
+	for (size_t i = 0; i < ARRAY_SIZE(regs); ++i)
+	{
+		printf("%02x", regs[i]);
+		printf(" = ");
+		printf("%04x", ReadReg(regs[i]));
+		printf("\n");
+	}
+}
 
+// AC101 PA Power
+// enables or disables the speaker outputs
 void AC101::ac101_pa_power(bool enable)
 {
     gpio_config_t  io_conf;
@@ -324,7 +290,7 @@ void AC101::ac101_pa_power(bool enable)
 }
 
 // printBits
-// print out any value in binary format
+// print out any value in binary format used for debugging
 void AC101::printBits(size_t const size, void const * const ptr)
 {
     unsigned char *b = (unsigned char*) ptr;
@@ -342,10 +308,72 @@ void AC101::printBits(size_t const size, void const * const ptr)
     puts("");
 }
 // printRead
-// print out the contents of any ac101 register
+// print out the contents of any ac101 register used for debugging
 void AC101::printRead(uint8_t reg)
 {
     uint8_t buf[2];
     ReadReg_Full(reg, buf, 2 );
     printBits(sizeof(buf), &buf);
+}
+
+// Write to a register of the AC101
+// reg: Register Address
+// val: Value to be written
+// @return false on success, true on failure.
+esp_err_t AC101::WriteReg(uint8_t reg, uint16_t val)
+{
+    esp_err_t ret = ESP_OK;
+    uint8_t buf[2];
+    buf[0] = uint8_t((val >> 8) & 0xff);
+    buf[1] = uint8_t(val & 0xff);
+    
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    ret |= i2c_master_start(cmd);
+    ret |= i2c_master_write_byte(cmd, (AC101_ADDR << 1) | WRITE_BIT, ACK_CHECK_EN);
+    ret |= i2c_master_write_byte(cmd, reg, ACK_CHECK_EN);
+    ret |= i2c_master_write(cmd, buf, 2, ACK_CHECK_EN);
+    ret |= i2c_master_stop(cmd);
+    ret |= i2c_master_cmd_begin((i2c_port_t) I2C_MASTER_NUM, cmd, 1000 / portTICK_RATE_MS);
+    i2c_cmd_link_delete(cmd);
+    return ret;
+}
+
+// Read a register of the AC101
+// reg: Register Address to be read
+// @return false on success, true on failure.
+uint16_t AC101::ReadReg(uint8_t reg)
+{
+	uint16_t val = 0;
+	uint8_t data_rd[2];
+	ReadReg_Full(reg, data_rd, 2);
+	val=(data_rd[0]<<8)+data_rd[1];
+	return val;
+}
+
+// AC101 read register
+// Reads the value of the AC101 register Address
+// reg: Register Address
+// data_rd: Pointer to return value
+// size: size of data to be read
+// @return false on success, true on failure.
+esp_err_t AC101::ReadReg_Full(uint8_t reg, uint8_t* data_rd, size_t size)
+{
+    esp_err_t ret = ESP_OK;
+    if (size == 0) {
+    	return ESP_OK;
+    	}
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    ret |= i2c_master_start(cmd);
+    ret |= i2c_master_write_byte(cmd, (AC101_ADDR << 1), ACK_CHECK_EN);
+    ret |= i2c_master_write_byte(cmd, reg, ACK_CHECK_EN);
+    ret |= i2c_master_start(cmd);
+    ret |= i2c_master_write_byte(cmd, (AC101_ADDR << 1) | READ_BIT, ACK_CHECK_EN);
+    if (size > 1) {
+        ret |= i2c_master_read(cmd, data_rd, size - 1, ACK_VAL);
+    }
+    ret |= i2c_master_read_byte(cmd, data_rd + size - 1, NACK_VAL);
+    ret |= i2c_master_stop(cmd);
+    ret |= i2c_master_cmd_begin((i2c_port_t) I2C_MASTER_NUM, cmd, 1000 / portTICK_RATE_MS);
+    i2c_cmd_link_delete(cmd);
+    return ret;
 }

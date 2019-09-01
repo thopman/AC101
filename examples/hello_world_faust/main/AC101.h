@@ -1,4 +1,7 @@
 /*
+	AC101 - a AC101 Codec driver library for ESP-IDF
+	ported to esp-idf by Thomas Hopman from the Arduino driver made by Ivo Pullens
+
 	AC101 - An AC101 Codec driver library for Arduino
 	Copyright (C) 2019, Ivo Pullens, Emmission
 
@@ -22,7 +25,6 @@
 #ifndef AC101_H
 #define AC101_H
 
-//#include <inttypes.h>
 #include <stdio.h>
 #include <stdint.h>
 #include "esp_types.h"
@@ -240,7 +242,10 @@ public:
 	// Initialize the I2C interface
     esp_err_t InitI2C(void);
 
+	// AC101 begin
 	// Initialize codec, using provided I2C pins and bus frequency.
+	// sets up 24 bit 48Khz sample-rate
+	// enables line input, line (headphone) output and turns on the speaker outputs
 	// @return false on success, true on failure.
 	esp_err_t begin();
 
@@ -295,22 +300,41 @@ public:
 	// @return false on success, true on failure.
 	esp_err_t SetMode(Mode_t mode);
 
-	// Dumps the current register configuration to serial.
+	// AC101 DumpRegister
+	// prints out contents of the AC101 registers in hex
 	void DumpRegisters();
 	
-	//
+	// AC101 PA Power
+	// enables or disables the speaker outputs
 	void ac101_pa_power(bool enable);
 
+	// printBits
+	// print out any value in binary format. Used for debugging
 	void printBits(size_t const size, void const * const ptr);
 
+	// printRead
+	// print out the contents of any ac101 register. Used for debugging
     void printRead(uint8_t reg);
 
 protected:
 
+	// Write to a register of the AC101
+	// reg: Register Address
+	// val: Value to be written
+	// @return false on success, true on failure.
 	esp_err_t WriteReg(uint8_t reg, uint16_t val);
 
+	// Read a register of the AC101
+	// reg: Register Address to be read
+	// @return: uint16_t value of register.
 	uint16_t ReadReg(uint8_t reg);
 
+	// AC101 read register full
+	// Reads the value of the AC101 register Address
+	// reg: Register Address
+	// data_rd: Pointer to return value
+	// size: size of data to be read
+	// @return false on success, true on failure.
 	esp_err_t ReadReg_Full(uint8_t reg, uint8_t* data_rd, size_t size);
 	
 };
