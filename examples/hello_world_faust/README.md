@@ -1,5 +1,3 @@
-# Hello World Example
+# Hello World Faust Example
 
-Starts a FreeRTOS task to print "Hello World"
-
-See the README.md file in the upper level 'examples' directory for more information about examples.
+Faust-esp32 sawtooth example for the a1-thinker a1s board using the ac101 codec. 
