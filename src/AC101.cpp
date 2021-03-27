@@ -42,6 +42,7 @@ esp_err_t AC101::InitI2C(void)
 {
     i2c_port_t i2c_master_port = (i2c_port_t) I2C_MASTER_NUM;
     i2c_config_t conf;
+    memset(&conf, 0, sizeof(i2c_config_t)); //Might require to #include "string.h"
     conf.mode = I2C_MODE_MASTER;
     conf.sda_io_num = (gpio_num_t) I2C_MASTER_SDA_IO;
     conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
